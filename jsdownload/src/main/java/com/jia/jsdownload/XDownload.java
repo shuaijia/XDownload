@@ -23,7 +23,7 @@ import static android.net.sip.SipErrorCode.TIME_OUT;
  * Created by jia on 2017/7/23.
  */
 
-public class DownloadUtil {
+public class XDownload {
 
     public static final int THREAD_NUM = 3;
 
@@ -231,7 +231,6 @@ public class DownloadUtil {
                 long currentLocation = dEntity.startLocation;
                 while ((len = is.read(buffer)) != -1) {
                     if (isCancel) {
-
                         break;
                     }
 
@@ -241,7 +240,7 @@ public class DownloadUtil {
 
                     //把下载数据数据写入文件
                     file.write(buffer, 0, len);
-                    synchronized (DownloadUtil.this) {
+                    synchronized (XDownload.this) {
                         mCurrentLocation += len;
                         /**
                          * 这里需改为百分比
@@ -254,7 +253,7 @@ public class DownloadUtil {
                 is.close();
 
                 if (isCancel) {
-                    synchronized (DownloadUtil.this) {
+                    synchronized (XDownload.this) {
                         mCancelNum++;
                         if (mCancelNum == THREAD_NUM) {
                             File configFile = new File(configFPath);
@@ -276,7 +275,7 @@ public class DownloadUtil {
 
                 //停止状态不需要删除记录文件
                 if (isStop) {
-                    synchronized (DownloadUtil.this) {
+                    synchronized (XDownload.this) {
                         mStopNum++;
                         String location = String.valueOf(currentLocation);
 
