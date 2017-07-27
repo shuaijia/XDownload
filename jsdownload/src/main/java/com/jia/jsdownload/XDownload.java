@@ -167,11 +167,17 @@ public class XDownload {
 
 
                 } catch (MalformedURLException e) {
-                    e.printStackTrace();
+                    isDownloading = false;
+                    System.gc();
+                    listener.onFail();
                 } catch (ProtocolException e) {
-                    e.printStackTrace();
+                    isDownloading = false;
+                    System.gc();
+                    listener.onFail();
                 } catch (IOException e) {
-                    e.printStackTrace();
+                    isDownloading = false;
+                    System.gc();
+                    listener.onFail();
                 }
 
 
