@@ -4,11 +4,12 @@
 ```java
 allprojects {
   repositories {
+    ...
     maven { url 'https://www.jitpack.io' }
   }
 }
 
 dependencies {
-  compile 'com.github.shuaijia:XDownload:alpha'
+  compile 'com.github.shuaijia:XDownload:alpha1.0'
 }
 ```
