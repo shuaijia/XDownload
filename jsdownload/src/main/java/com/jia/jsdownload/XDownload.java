@@ -25,23 +25,34 @@ import static android.net.sip.SipErrorCode.TIME_OUT;
 
 public class XDownload {
 
+    // 下载线程数
     public static final int THREAD_NUM = 3;
 
+    // 是否取消下载
     private boolean isCancel = false;
+
+    // 是否暂停下载
     private boolean isStop = false;
 
+    // 下载回调
     private DownloadListener listener;
 
+    // 当前下载位置
     private long mCurrentLocation = 0;
 
+    // 是否正在现在
     private boolean isDownloading;
 
+    // 取消线程数
     private int mCancelNum;
 
+    // 暂停线程数
     private int mStopNum;
 
+    // 完成线程数
     private int mCompleteThreadNum;
 
+    // 是否新开下载任务
     private boolean newTask;
 
 
