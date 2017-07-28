@@ -81,3 +81,9 @@ download.download(context, "", "", new DownloadListener() {
   }
 });
 ```
+### 此外，你还可以取消下载和暂停下载
+```java
+download.stopDownload(true);
+download.cancelDownload(true);
+```
+### 欢迎骚扰哦 819418850@qq.com
