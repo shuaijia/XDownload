@@ -9,20 +9,15 @@ import java.net.HttpURLConnection;
 public interface DownloadListener {
 
     /**
-     * 取消
-     */
-    public void onCancel();
-
-    /**
-     * 下载失败
-     */
-    public void onFail();
-
-    /**
      * 准备好下载
      * @param connection
      */
     public void onPreDownload(HttpURLConnection connection);
+
+    /**
+     * 开始下载
+     */
+    public void onStart();
 
     /**
      * 下载进度
@@ -31,9 +26,9 @@ public interface DownloadListener {
     public void onProgress(int progress);
 
     /**
-     * 开始下载
+     * 停止下载
      */
-    public void onStart(long startLocation);
+    public void onStop(long stopLocation);
 
     /**
      * 恢复下载
@@ -41,13 +36,18 @@ public interface DownloadListener {
     public void onResume(long resumeLocation);
 
     /**
-     * 停止下载
-     */
-    public void onStop(long stopLocation);
-
-    /**
      * 完成下载
      */
     public void onComplete();
+
+    /**
+     * 取消
+     */
+    public void onCancel();
+
+    /**
+     * 下载失败
+     */
+    public void onFail(int errorCode);
 
 }

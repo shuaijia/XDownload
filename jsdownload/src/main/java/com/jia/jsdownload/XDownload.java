@@ -4,6 +4,9 @@ import android.content.Context;
 import android.support.annotation.NonNull;
 import android.util.SparseArray;
 
+import com.jia.jsdownload.config.ErrorCode;
+import com.jia.jsdownload.db.XDownloadDBUtils;
+
 import java.io.File;
 import java.io.IOException;
 import java.io.InputStream;
@@ -14,15 +17,12 @@ import java.net.ProtocolException;
 import java.net.URL;
 import java.util.Properties;
 
-import static android.net.sip.SipErrorCode.TIME_OUT;
-
 /**
  * 下载工具类
  * 注意：1、恢复下载时：已下载的文件大小 = 该线程的上一次断点的位置 - 该线程起始下载位置；
  * 2、为了保证下载文件的完整性，只要记录文件不存在就需要重新进行下载；
  * Created by jia on 2017/7/23.
  */
-
 public class XDownload {
 
     // 下载线程数
@@ -40,6 +40,9 @@ public class XDownload {
     // 当前下载位置
     private long mCurrentLocation = 0;
 
+    // 文件总大小
+    private long fileLength = 0;
+
     // 是否正在现在
     private boolean isDownloading;
 
@@ -55,6 +58,10 @@ public class XDownload {
     // 是否新开下载任务
     private boolean newTask;
 
+    private XDownloadDBUtils dbUtils;
+
+    private String downloadUrl;
+
 
     public void download(final Context context, @NonNull final String downloadUrl, @NonNull final String filePath,
                          @NonNull final DownloadListener downloadListener) {
@@ -64,21 +71,22 @@ public class XDownload {
         isCancel = false;
         mCancelNum = 0;
         mStopNum = 0;
+        this.downloadUrl = downloadUrl;
         final File dFile = new File(filePath);
 
-        //读取已完成的线程数
-        final File configFile = new File(context.getFilesDir().getPath() + "/temp/" + dFile.getName() + ".properties");
+        // 创建数据库工具
+        dbUtils = new XDownloadDBUtils(context);
 
         try {
-            if (!configFile.exists()) { //记录文件被删除，则重新下载
-                newTask = true;
-//                FileUtil.createFile(configFile.getPath());
-            } else {
+            //记录文件被删除，则重新下载
+            if (dbUtils.haveFile(downloadUrl)) {
                 newTask = false;
+            } else {
+                dbUtils.addDownloadRecord(downloadUrl);
+                newTask = true;
             }
         } catch (Exception e) {
-            e.printStackTrace();
-            listener.onFail();
+            listener.onFail(ErrorCode.IO_ERROR);
             return;
         }
 
@@ -94,62 +102,68 @@ public class XDownload {
                     HttpURLConnection conn = (HttpURLConnection) url.openConnection();
                     conn.setRequestMethod("GET");
                     conn.setRequestProperty("Charset", "UTF-8");
-                    conn.setConnectTimeout(TIME_OUT);
+                    conn.setConnectTimeout(6000);
                     conn.setRequestProperty("User-Agent", "Mozilla/4.0 (compatible; MSIE 8.0; Windows NT 5.2; Trident/4.0; .NET CLR 1.1.4322; .NET CLR 2.0.50727; .NET CLR 3.0.04506.30; .NET CLR 3.0.4506.2152; .NET CLR 3.5.30729)");
                     conn.setRequestProperty("Accept", "image/gif, image/jpeg, image/pjpeg, image/pjpeg, application/x-shockwave-flash, application/xaml+xml, application/vnd.ms-xpsdocument, application/x-ms-xbap, application/x-ms-application, application/vnd.ms-excel, application/vnd.ms-powerpoint, application/msword, */*");
                     conn.connect();
 
                     int len = conn.getContentLength();
-                    if (len < 0) {  //网络被劫持时会出现这个问题
-                        listener.onFail();
+                    if (len < 0) {
+                        listener.onFail(ErrorCode.CONNECTION_LENGTH_IS_NULL);
                         return;
                     }
                     int code = conn.getResponseCode();
 
                     if (code == 200) {
-                        int fileLength = conn.getContentLength();
+                        fileLength = conn.getContentLength();
+
+                        dbUtils.setFileLength(downloadUrl, fileLength);
+
                         //必须建一个文件
-//                        FileUtil.createFile(filePath);
+                        File dFile = new File(filePath);
                         RandomAccessFile file = new RandomAccessFile(filePath, "rwd");
                         //设置文件长度
                         file.setLength(fileLength);
+
                         listener.onPreDownload(conn);
 
                         //分配每条线程的下载区间
-                        Properties pro = null;
-//                        pro = Util.loadConfig(configFile);
-                        int blockSize = fileLength / THREAD_NUM;
+                        long blockSize = fileLength / THREAD_NUM;
                         SparseArray tasks = new SparseArray<>();
+
+                        // 判断三个线程当前位置是否为设计的结束位置，是的话表示当前线程已经下载完
                         for (int i = 0; i < THREAD_NUM; i++) {
 
-                            long startL = i * blockSize, endL = (i + 1) * blockSize;
-                            Object state = pro.getProperty(dFile.getName() + "_state_" + i);
-                            if (state != null && Integer.parseInt(state + "") == 1) {  //该线程已经完成
-                                mCurrentLocation += endL - startL;
+                            long startL = i * blockSize;
+                            long endL = (i + 1) * blockSize - 1;
+                            if (i == 2) {
+                                endL = fileLength;
+                            }
+
+                            if (endL == dbUtils.getThreadCurrentPosition(downloadUrl, i)) {
                                 mCompleteThreadNum++;
+                                mCurrentLocation += endL - startL;
                                 if (mCompleteThreadNum == THREAD_NUM) {
-                                    if (configFile.exists()) {
-                                        configFile.delete();
-                                    }
                                     listener.onComplete();
+                                    // 下载完成，删除记录
+                                    dbUtils.deleteDownloadRecord(downloadUrl);
                                     isDownloading = false;
                                     System.gc();
                                     return;
                                 }
                                 continue;
                             }
+
+
                             //分配下载位置
-                            Object record = pro.getProperty(dFile.getName() + "_record_" + i);
-                            if (!newTask && record != null && Long.parseLong(record + "") > 0) {       //如果有记录，则恢复下载
-                                Long r = Long.parseLong(record + "");
+                            if (!newTask) {       //如果有记录，则恢复下载
+                                Long r = dbUtils.getThreadCurrentPosition(downloadUrl, i);
                                 mCurrentLocation += r - startL;
                                 startL = r;
                             }
-                            if (i == (THREAD_NUM - 1)) {
-                                endL = fileLength;//如果整个文件的大小不为线程个数的整数倍，则最后一个线程的结束位置即为文件的总长度
-                            }
+
                             DownloadEntity entity = new DownloadEntity(fileLength, downloadUrl, i, startL, endL, dFile, context);
-                            DownloadTask task = new DownloadTask(entity);
+                            DownloadTask task = new DownloadTask(entity, i);
                             tasks.put(i, new Thread(task));
 
                         }
@@ -157,7 +171,7 @@ public class XDownload {
                         if (mCurrentLocation > 0) {
                             listener.onResume(mCurrentLocation);
                         } else {
-                            listener.onStart(mCurrentLocation);
+                            listener.onStart();
                         }
 
                         // 遍历子线程任务，开始下载
@@ -173,22 +187,22 @@ public class XDownload {
 
                         isDownloading = false;
                         System.gc();
-                        listener.onFail();
+                        listener.onFail(ErrorCode.SERVER_ERROR);
                     }
 
 
                 } catch (MalformedURLException e) {
                     isDownloading = false;
                     System.gc();
-                    listener.onFail();
+                    listener.onFail(ErrorCode.URL_ERROR);
                 } catch (ProtocolException e) {
                     isDownloading = false;
                     System.gc();
-                    listener.onFail();
+                    listener.onFail(ErrorCode.PROTOCOL_ERROR);
                 } catch (IOException e) {
                     isDownloading = false;
                     System.gc();
-                    listener.onFail();
+                    listener.onFail(ErrorCode.IO_ERROR);
                 }
 
 
@@ -196,11 +210,11 @@ public class XDownload {
         }).start();
     }
 
-    public void setCancel(boolean cancel) {
+    public void cancelDownload(boolean cancel) {
         isCancel = cancel;
     }
 
-    public void setStop(boolean stop) {
+    public void stopDownload(boolean stop) {
         isStop = stop;
     }
 
@@ -213,11 +227,11 @@ public class XDownload {
 
         private DownloadEntity dEntity;
 
-        private String configFPath;
+        private int threadId;
 
-        public DownloadTask(DownloadEntity downloadEntity) {
+        public DownloadTask(DownloadEntity downloadEntity, int threadId) {
             this.dEntity = downloadEntity;
-            configFPath = downloadEntity.context.getFilesDir().getPath() + "/temp/" + downloadEntity.tempFile.getName() + ".properties";
+            this.threadId = threadId;
         }
 
         @Override
@@ -259,10 +273,9 @@ public class XDownload {
                     file.write(buffer, 0, len);
                     synchronized (XDownload.this) {
                         mCurrentLocation += len;
-                        /**
-                         * 这里需改为百分比
-                         */
-                        listener.onProgress((int) mCurrentLocation);
+                        // 返回下载进度
+                        int percent = (int) ((mCurrentLocation / fileLength) * 100);
+                        listener.onProgress(percent);
                     }
                     currentLocation += len;
                 }
@@ -273,14 +286,7 @@ public class XDownload {
                     synchronized (XDownload.this) {
                         mCancelNum++;
                         if (mCancelNum == THREAD_NUM) {
-                            File configFile = new File(configFPath);
-                            if (configFile.exists()) {
-                                configFile.delete();
-                            }
-
-                            if (dEntity.tempFile.exists()) {
-                                dEntity.tempFile.delete();
-                            }
+                            dbUtils.deleteDownloadRecord(downloadUrl);
 
                             isDownloading = false;
                             listener.onCancel();
@@ -294,12 +300,11 @@ public class XDownload {
                 if (isStop) {
                     synchronized (XDownload.this) {
                         mStopNum++;
-                        String location = String.valueOf(currentLocation);
 
                         /**
-                         * 此处为断点续传机制，讲暂停时的下载位置保存
+                         * 此处为断点续传机制，将暂停时的下载位置保存
                          */
-//                        writeConfig(dEntity.tempFile.getName() + "_record_" + dEntity.threadId, location);
+                        dbUtils.setThreadCurrentPosition(downloadUrl, threadId,currentLocation);
                         if (mStopNum == THREAD_NUM) {
 
                             isDownloading = false;
@@ -310,25 +315,21 @@ public class XDownload {
                     return;
                 }
 
-//                writeConfig(dEntity.tempFile.getName() + "_state_" + dEntity.threadId, 1 + "");
-//                listener.onChildComplete(dEntity.endLocation);
                 mCompleteThreadNum++;
                 if (mCompleteThreadNum == THREAD_NUM) {
-                    File configFile = new File(configFPath);
-                    if (configFile.exists()) {
-                        configFile.delete();
-                    }
                     listener.onComplete();
+                    // 下载完成，删除记录
+                    dbUtils.deleteDownloadRecord(downloadUrl);
                     isDownloading = false;
                     System.gc();
                 }
 
             } catch (MalformedURLException e) {
                 isDownloading = false;
-                listener.onFail();
+                listener.onFail(ErrorCode.URL_ERROR);
             } catch (IOException e) {
                 isDownloading = false;
-                listener.onFail();
+                listener.onFail(ErrorCode.IO_ERROR);
             }
 
         }
