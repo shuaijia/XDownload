@@ -39,7 +39,7 @@ XDownload download = new XDownload();
 ### step4
 #### 开始下载，处理回调
 ```java
-download.download(context, "", "", new DownloadListener() {
+download.download(context, "DOWNLOAD_URL", "SAVE_FILE_PATH", new DownloadListener() {
   @Override
   public void onPreDownload(HttpURLConnection connection) {
     Log.e(TAG, "onPreDownload: 准备好");
